@@ -6,9 +6,14 @@ import datetime
 # Setup Streamlit layout
 st.set_page_config(page_title="Attendance Auto-Fill Portal", layout="wide")
 st.title("📊 Attendance Auto-Fill Portal")
-st.markdown("Excel တွင် 0 ပြနေသော နေရာများတွင် Google Sheet မှ Data များ အလိုအလျောက် ဖြည့်ပေးမည့် Portal")
+st.markdown("Excel တွင် 0 သို့မဟုတ် သတ်မှတ်နာရီမပြည့်သော နေရာများတွင် Google Sheet မှ Data များ အလိုအလျောက် ဖြည့်ပေးမည့် Portal")
 
-st.info("💡 **Logic:** ဝန်ထမ်း၏ ID (သို့မဟုတ်) Name ဖြင့် Google Sheet တွင် တိုက်စစ်ပြီး ဖြည့်သွင်းပေးပါမည်။ Google Sheet တွင် `D` သို့မဟုတ် `ORC` ဖြစ်နေပါက Excel တွင် `SI` ဟု ဖြည့်ပေးပါမည်။")
+st.info("""
+💡 **Logic Rules:**
+- **0 ဖြစ်နေပါက:** Google Sheet တွင် `D` သို့မဟုတ် `ORC` ဆိုပါက `SI` ဟု ဖြည့်မည်။ (`NF`, `L`, `HL` စသည်ဆိုပါက ၎င်းအတိုင်း ဖြည့်မည်)
+- **5 အောက် ငယ်နေပါက:** Google Sheet တွင် `NF` ဆိုပါက `NF` ဟု ဖြည့်မည်။
+- **8 အောက် ငယ်နေပါက:** Google Sheet တွင် `HL` ဆိုပါက `HL` ဟု ဖြည့်မည်။
+""")
 
 # 1. Hardcoded Google Sheet CSV Export URL
 GS_CSV_URL = "https://docs.google.com/spreadsheets/d/1_G-YC1wUsE0_VMn2YDA9cnyspBqG_5HsFIc0T8g1mCs/export?format=csv&gid=1448030562"
@@ -99,7 +104,18 @@ if excel_file is not None:
                 for ex_col in excel_date_cols:
                     ex_val = row[ex_col]
                     
+                    # 🟢 FIX 11: Safely convert to float to check numeric thresholds (< 5, < 8)
+                    val_f = None
                     if pd.isna(ex_val) or str(ex_val).strip() in ['0', '0.0', '0.00']:
+                        val_f = 0.0
+                    else:
+                        try:
+                            val_f = float(ex_val)
+                        except (ValueError, TypeError):
+                            val_f = None # Already a string like 'NF', 'L'
+                    
+                    # If it's a number and < 8, we need to check the Google Sheet
+                    if val_f is not None and val_f < 8.0:
                         matched_gs_col = None
                         ex_date_str = parse_date_string(ex_col.strip())
                         
@@ -113,16 +129,25 @@ if excel_file is not None:
                         if matched_gs_col:
                             gs_val = str(gs_row[matched_gs_col]).strip()
                             
-                            # 🟢 FIX 10: Changed Logic to include ORC
-                            if gs_val in ['D', 'ORC']:
-                                df_excel.at[idx, ex_col] = 'SI'
-                                si_records.append({
-                                    'Name': row[excel_name_col], 
-                                    'Date': ex_date_str, 
-                                    'Action': f'Changed {gs_val} to SI'
-                                })
-                            elif gs_val in ['NF', 'L', 'AB', 'UU', 'HL', 'ML', 'Resign']:
-                                df_excel.at[idx, ex_col] = gs_val
+                            # Rule 1: If value is 0
+                            if val_f == 0.0:
+                                if gs_val in ['D', 'ORC']:
+                                    df_excel.at[idx, ex_col] = 'SI'
+                                    si_records.append({
+                                        'Name': row[excel_name_col], 
+                                        'Date': ex_date_str, 
+                                        'Action': f'Changed {gs_val} to SI'
+                                    })
+                                elif gs_val in ['NF', 'L', 'AB', 'UU', 'HL', 'ML', 'Resign']:
+                                    df_excel.at[idx, ex_col] = gs_val
+                            
+                            # Rule 2: If value is < 5 and GS is 'NF'
+                            elif val_f < 5.0 and gs_val == 'NF':
+                                df_excel.at[idx, ex_col] = 'NF'
+                                
+                            # Rule 3: If value is < 8 and GS is 'HL'
+                            elif val_f < 8.0 and gs_val == 'HL':
+                                df_excel.at[idx, ex_col] = 'HL'
 
         # --- Count NF and L ---
         df_excel['NF Count'] = df_excel.apply(lambda row: (row == 'NF').sum(), axis=1)
