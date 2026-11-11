@@ -88,7 +88,8 @@ if excel_file is not None:
             if name and name != 'nan':
                 gs_dict_by_name[name] = row
                 
-        si_records = []
+        # 🟢 FIX 12: Changed 'si_records' to a general 'modified_records' list
+        modified_records = []
         
         for idx, row in df_excel.iterrows():
             emp_id = str(row[excel_id_col]).strip()
@@ -104,7 +105,6 @@ if excel_file is not None:
                 for ex_col in excel_date_cols:
                     ex_val = row[ex_col]
                     
-                    # 🟢 FIX 11: Safely convert to float to check numeric thresholds (< 5, < 8)
                     val_f = None
                     if pd.isna(ex_val) or str(ex_val).strip() in ['0', '0.0', '0.00']:
                         val_f = 0.0
@@ -112,9 +112,8 @@ if excel_file is not None:
                         try:
                             val_f = float(ex_val)
                         except (ValueError, TypeError):
-                            val_f = None # Already a string like 'NF', 'L'
+                            val_f = None
                     
-                    # If it's a number and < 8, we need to check the Google Sheet
                     if val_f is not None and val_f < 8.0:
                         matched_gs_col = None
                         ex_date_str = parse_date_string(ex_col.strip())
@@ -128,26 +127,42 @@ if excel_file is not None:
                         
                         if matched_gs_col:
                             gs_val = str(gs_row[matched_gs_col]).strip()
+                            original_val_str = str(val_f) if val_f != 0.0 else "0"
                             
                             # Rule 1: If value is 0
                             if val_f == 0.0:
                                 if gs_val in ['D', 'ORC']:
                                     df_excel.at[idx, ex_col] = 'SI'
-                                    si_records.append({
+                                    modified_records.append({
                                         'Name': row[excel_name_col], 
                                         'Date': ex_date_str, 
                                         'Action': f'Changed {gs_val} to SI'
                                     })
                                 elif gs_val in ['NF', 'L', 'AB', 'UU', 'HL', 'ML', 'Resign']:
                                     df_excel.at[idx, ex_col] = gs_val
+                                    modified_records.append({
+                                        'Name': row[excel_name_col], 
+                                        'Date': ex_date_str, 
+                                        'Action': f'Filled with {gs_val}'
+                                    })
                             
                             # Rule 2: If value is < 5 and GS is 'NF'
-                            elif val_f < 5.0 and gs_val == 'NF':
+                            elif val_f > 0 and val_f < 5.0 and gs_val == 'NF':
                                 df_excel.at[idx, ex_col] = 'NF'
+                                modified_records.append({
+                                    'Name': row[excel_name_col], 
+                                    'Date': ex_date_str, 
+                                    'Action': f'Changed {original_val_str} to NF'
+                                })
                                 
                             # Rule 3: If value is < 8 and GS is 'HL'
-                            elif val_f < 8.0 and gs_val == 'HL':
+                            elif val_f >= 5.0 and val_f < 8.0 and gs_val == 'HL':
                                 df_excel.at[idx, ex_col] = 'HL'
+                                modified_records.append({
+                                    'Name': row[excel_name_col], 
+                                    'Date': ex_date_str, 
+                                    'Action': f'Changed {original_val_str} to HL'
+                                })
 
         # --- Count NF and L ---
         df_excel['NF Count'] = df_excel.apply(lambda row: (row == 'NF').sum(), axis=1)
@@ -165,11 +180,11 @@ if excel_file is not None:
         df_excel = pd.concat([df_excel, pd.DataFrame([grand_total_row])], ignore_index=True)
 
         # --- Show Results ---
-        st.write("### 🔍 SI Records (Excel တွင် 0 ဖြစ်ပြီး Google Sheet တွင် D သို့မဟုတ် ORC ဖြစ်နေသူများ)")
-        if si_records:
-            st.dataframe(pd.DataFrame(si_records))
+        st.write("### 🔍 Modified Records (SI, NF, HL အဖြစ် ပြောင်းလဲသွားသော မှတ်တမ်းများ)")
+        if modified_records:
+            st.dataframe(pd.DataFrame(modified_records), use_container_width=True)
         else:
-            st.info("No SI records found.")
+            st.info("No records were modified.")
             
         st.write("### Preview of Updated Excel Data")
         st.dataframe(df_excel, use_container_width=True, height=600)
