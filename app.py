@@ -88,7 +88,6 @@ if excel_file is not None:
             if name and name != 'nan':
                 gs_dict_by_name[name] = row
                 
-        # 🟢 FIX 12: Changed 'si_records' to a general 'modified_records' list
         modified_records = []
         
         for idx, row in df_excel.iterrows():
@@ -133,6 +132,7 @@ if excel_file is not None:
                             if val_f == 0.0:
                                 if gs_val in ['D', 'ORC']:
                                     df_excel.at[idx, ex_col] = 'SI'
+                                    # Record တွင် D သို့မဟုတ် ORC မှ SI သို့ပြောင်းသည်ကိုသာ မှတ်မည်
                                     modified_records.append({
                                         'Name': row[excel_name_col], 
                                         'Date': ex_date_str, 
@@ -140,11 +140,7 @@ if excel_file is not None:
                                     })
                                 elif gs_val in ['NF', 'L', 'AB', 'UU', 'HL', 'ML', 'Resign']:
                                     df_excel.at[idx, ex_col] = gs_val
-                                    modified_records.append({
-                                        'Name': row[excel_name_col], 
-                                        'Date': ex_date_str, 
-                                        'Action': f'Filled with {gs_val}'
-                                    })
+                                    # 🟢 FIX 13: မှန်ကန်သော 0 အစားထိုးခြင်းများကို Record တွင် မပြတော့ပါ
                             
                             # Rule 2: If value is < 5 and GS is 'NF'
                             elif val_f > 0 and val_f < 5.0 and gs_val == 'NF':
