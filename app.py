@@ -1,11 +1,14 @@
 import streamlit as st
 import pandas as pd
 import io
+import datetime
 
 # Setup Streamlit layout
 st.set_page_config(page_title="Attendance Auto-Fill Portal", layout="wide")
 st.title("📊 Attendance Auto-Fill Portal")
 st.markdown("Excel တွင် 0 ပြနေသော နေရာများတွင် Google Sheet မှ Data များ အလိုအလျောက် ဖြည့်ပေးမည့် Portal")
+
+st.info("💡 **Logic:** ဝန်ထမ်း၏ ID (သို့မဟုတ်) Name ဖြင့် Google Sheet တွင် တိုက်စစ်ပြီး ဖြည့်သွင်းပေးပါမည်။ Google Sheet တွင် `D` သို့မဟုတ် `ORC` ဖြစ်နေပါက Excel တွင် `SI` ဟု ဖြည့်ပေးပါမည်။")
 
 # 1. Hardcoded Google Sheet CSV Export URL
 GS_CSV_URL = "https://docs.google.com/spreadsheets/d/1_G-YC1wUsE0_VMn2YDA9cnyspBqG_5HsFIc0T8g1mCs/export?format=csv&gid=1448030562"
@@ -31,17 +34,16 @@ if excel_file is not None:
         with st.spinner("Fetching data from Google Sheet..."):
             df_excel = pd.read_excel(excel_file)
             
-            # 🟢 FIX 8: Clean columns and add a hidden space at the end to force Excel to treat it as Text
+            # Clean columns and add a hidden space at the end to force Excel to treat it as Text
             cleaned_columns = []
             for col in df_excel.columns:
-                if isinstance(col, pd.Timestamp) or (isinstance(col, str) and '00:00:00' in str(col)):
-                    clean_date = str(col).split(' ')[0]
-                    cleaned_columns.append(f"{clean_date} ") # Space appended here
+                if hasattr(col, 'strftime') or '00:00:00' in str(col):
+                    clean_date = str(col).split(' ')[0].strip()
+                    cleaned_columns.append(f"{clean_date} ") # Space appended
                 else:
-                    cleaned_columns.append(str(col))
+                    cleaned_columns.append(str(col).strip())
                     
             df_excel.columns = cleaned_columns
-            
             df_gs = pd.read_csv(GS_CSV_URL)
             
         st.success("✅ Data fetched successfully! Processing matching rules...")
@@ -53,7 +55,6 @@ if excel_file is not None:
         gs_id_col = df_gs.columns[2]         # Column C (ID)
         gs_name_col = df_gs.columns[3]       # Column D (Name)
         
-        # Find where the date columns start and end
         all_cols = list(df_excel.columns)
         date_start_idx = 5
         date_end_idx = len(all_cols)
@@ -63,7 +64,6 @@ if excel_file is not None:
         excel_date_cols = all_cols[date_start_idx:date_end_idx]
         gs_date_cols = df_gs.columns[5:]
         
-        # Format Excel Data
         for col in excel_date_cols:
             df_excel[col] = df_excel[col].apply(
                 lambda x: round(float(x), 1) if pd.notna(x) and isinstance(x, (int, float)) 
@@ -101,7 +101,7 @@ if excel_file is not None:
                     
                     if pd.isna(ex_val) or str(ex_val).strip() in ['0', '0.0', '0.00']:
                         matched_gs_col = None
-                        ex_date_str = parse_date_string(ex_col.strip()) # strip the space for matching
+                        ex_date_str = parse_date_string(ex_col.strip())
                         
                         if ex_date_str:
                             for gs_col in gs_date_cols:
@@ -113,14 +113,15 @@ if excel_file is not None:
                         if matched_gs_col:
                             gs_val = str(gs_row[matched_gs_col]).strip()
                             
-                            if gs_val == 'D':
+                            # 🟢 FIX 10: Changed Logic to include ORC
+                            if gs_val in ['D', 'ORC']:
                                 df_excel.at[idx, ex_col] = 'SI'
                                 si_records.append({
                                     'Name': row[excel_name_col], 
                                     'Date': ex_date_str, 
-                                    'Action': 'Changed to SI'
+                                    'Action': f'Changed {gs_val} to SI'
                                 })
-                            elif gs_val in ['NF', 'L', 'AB', 'UU', 'HL', 'ORC', 'ML', 'Resign']:
+                            elif gs_val in ['NF', 'L', 'AB', 'UU', 'HL', 'ML', 'Resign']:
                                 df_excel.at[idx, ex_col] = gs_val
 
         # --- Count NF and L ---
@@ -139,7 +140,7 @@ if excel_file is not None:
         df_excel = pd.concat([df_excel, pd.DataFrame([grand_total_row])], ignore_index=True)
 
         # --- Show Results ---
-        st.write("### 🔍 SI Records (Excel တွင် 0 ဖြစ်ပြီး Google Sheet တွင် D ဖြစ်နေသူများ)")
+        st.write("### 🔍 SI Records (Excel တွင် 0 ဖြစ်ပြီး Google Sheet တွင် D သို့မဟုတ် ORC ဖြစ်နေသူများ)")
         if si_records:
             st.dataframe(pd.DataFrame(si_records))
         else:
